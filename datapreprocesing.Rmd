@@ -1,0 +1,806 @@
+---
+title: "Práctica 2: ¿Cómo realizar la limpieza y análisis de datos?" 
+author: "Autor: Jhon Jairo Realpe"
+date: "Enero 2023"
+output:
+  html_document:
+    highlight: default
+    number_sections: yes
+    theme: cosmo
+    toc: yes
+    toc_depth: 2
+    includes:
+      in_header: PEC-header.html
+  pdf_document:
+    highlight: zenburn
+    toc: yes
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+------------------------------------------------------------------------
+
+Se cargan las librerías necesarias para el estudio
+
+```{r message=FALSE, warning=FALSE}
+if(!require('dplyr')) install.packages('dplyr'); library('dplyr')
+if(!require('tidyverse')) install.packages('tidyverse'); library('tidyverse') 
+if(!require('VIM')) install.packages('VIM'); library('VIM')
+if(!require('DAAG')) install.packages('DAAG'); library('DAAG')
+if(!require('Metrics')) install.packages('Metrics'); library('Metrics')
+if(!require('pROC')) install.packages('pROC'); library('pROC')
+if(!require('haven')) install.packages('haven'); library('haven')
+if(!require('e1071')) install.packages('e1071'); library('e1071')
+if(!require('psych')) install.packages('psych'); library('psych')
+if(!require('reshape2')) install.packages('reshape2'); library('reshape2')
+if(!require('inspectdf')) install.packages('inspectdf'); library('inspectdf')
+if(!require('corrplot')) install.packages('corrplot'); library('corrplot')
+if(!require('grid')) install.packages('grid'); library('grid')
+if(!require('gridExtra')) install.packages('gridExtra'); library('gridExtra')
+if(!require('car')) install.packages('car'); library('car')
+if(!require('caret')) install.packages('caret'); library('caret')
+if(!require('ipred')) install.packages('ipred'); library('ipred')
+if(!require('sjPlot')) install.packages('sjPlot'); library('sjPlot')
+if(!require('forecast')) install.packages('forecast'); library('forecast')
+```
+
+# **Lectura del fichero**
+
+Se carga el conjunto de datos
+
+```{r message=FALSE, warning=FALSE}
+data <- read_dta('data/gpa2.dta')
+```
+
+Se verifica la estructura y el tipo de datos
+
+```{r}
+str(data)
+```
+
+# **Descripción del dataset**
+
+El archivo contiene datos sobre el promedio de calificaciones (GPA) de los estudiantes matriculados en una universidad de Estados Unidos. El número de observaciones es igual a 4137 test asociados al Scholastic Assessment Test (SAT), que es el examen nacional estandarizado que realizan todos los estudiantes universitarios cada cuatro años.
+
+También se aprecia que contiene 12 variables, todas de tipo numéricas. Sin embargo, se resalta que las variables athelete, female, white y black son de tipo categórico y las variables restantes son continuas.
+
+
+| No | Variable | Descripción                                                       | Tipo       |
+| -- | -------- | ----------------------------------------------------------------- | ---------- |
+| 1  | sat      | Examen SAT combinado (lectura crítica/escritura)                  | Continua   |
+| 2  | tothrs   | Total de horas cursadas de clase hasta terminar el semestre       | Continua   |
+| 3  | colgpa   | Promedio de notas al terminar el semestre                         | Continua   |
+| 4  | athlete  |  \= 1 si es atleta                                                | Categórica |
+| 5  | verbmath | competencia verbal/competencia matemática del examen SAT          | Continua   |
+| 6  | hsize    | Tamaño del total de graduados en escuelas secundaria(en cientos)  | Continua   |
+| 7  | hsrank   | rango respecto al total de graduados                              | Continua   |
+| 8  | hsperc   | Percentil del total de graduados respecto al total de estudiantes | Continua   |
+| 9  | female   |  \= 1 si es mujer                                                 | Categórica |
+| 10 | white    |  \= 1 si es blanco                                                | Categórica |
+| 11 | black    |  \= 1 si es negro                                                 | Categórica |
+| 12 | hsizesq  | Total de graduados en escuelas secundaria(al cuadrado)            | Continua   |
+
+
+# **Limpieza de los datos**
+
+Se hace la conversión de los datos a valores numéricos y categóricos.
+
+```{r}
+
+data$sat <- as.numeric(data$sat)
+data$tothrs <- as.numeric(data$tothrs)
+data$colgpa <- as.numeric(data$colgpa)
+data$verbmath <- as.numeric(data$verbmath)
+data$hsize <- as.numeric(data$hsize)
+data$hsrank <- as.numeric(data$hsrank)
+data$hsperc <- as.numeric(data$hsperc)
+data$hsizesq <- as.numeric(data$hsizesq)
+data$athlete <- as.numeric(data$athlete)
+data$female <- as.numeric(data$female)
+data$white <- as.numeric(data$white)
+data$black <- as.numeric(data$black)
+
+data$athlete <- ifelse(data$athlete==1, TRUE, FALSE)
+data$female <- ifelse(data$female==1, TRUE, FALSE)
+data$white <- ifelse(data$white==1, TRUE, FALSE)
+data$black <- ifelse(data$black==1, TRUE, FALSE)
+
+data$athlete <- as.factor(data$athlete)
+data$female <- as.factor(data$female)
+data$white <- as.factor(data$white)
+data$black <- as.factor(data$black)
+```
+
+Se hace separación de los atributos en numéricos continuos y categóricos, para posteriores análisis
+
+```{r}
+data_num <- select_if(data, is.numeric)
+data_cat <- select_if(data, is.factor)
+```
+
+## **Gestión elementos nulos o vacíos**
+
+Se verifica que el conjunto de datos no tiene valores nulos.
+
+```{r}
+colSums(is.na(data))
+```
+
+Se verifica que el conjunto de datos no tiene valores vacíos.
+
+```{r}
+colSums(data=='')
+```
+
+**Observaciones**
+
+Dado que el conjunto de datos no presenta ni valores nulos ni vacíos, no se aplica ninguna técnica correctiva.
+
+## **Identificación y gestión de valores extremos**
+
+Para cada atributo continuo se grafica un histograma y un diagrama de bigotes para identificar valores extremos.
+
+```{r}
+graph_outliers <- function(data1, data2, name1, name2){
+
+  nf = layout(
+    rbind(
+      c(1, 2),
+      c(3, 4)
+    )
+  )
+
+
+  boxplot(data1, main = name1)
+  hist(data1, main=paste(c("Histogram", name1), collapse=" "), xlab="", col="blue")
+  
+  boxplot(data2, main = name2)
+  hist(data2, main=paste(c("Histogram", name2), collapse=" "), xlab="", col="blue")
+}
+```
+
+```{r}
+graph_outliers(data_num$sat, data_num$tothrs, "sat", "tothrs")
+graph_outliers(data_num$colgpa, data_num$verbmath, "colgpa", "verbmath")
+graph_outliers(data_num$hsize, data_num$hsrank, "hsize", "hsrank")
+graph_outliers(data_num$hsperc, data_num$hsizesq, "hsperc", "hsizesq")
+```
+
+Con la función stats integrada en boxplot, se extraen el número de valores extremos, es decir, todo valor que está fuera de los bigotes, que son las líneas que se ubica en el tercer cuartil +1.5 veces el rango intercuartílico y el primer cuartil -1.5 veces el rango intercuartílico.
+
+A continuación se hace un resumen de los valores extremos en las variables numéricas.
+
+```{r}
+# Se extraen los valores atípicos
+out_sat <- boxplot.stats(data_num$sat)$out
+out_tothrs <- boxplot.stats(data_num$tothrs)$out
+out_colgpa <- boxplot.stats(data_num$colgpa)$out
+out_verbmath <- boxplot.stats(data_num$verbmath)$out
+out_hsize <- boxplot.stats(data_num$hsize)$out
+out_hsrank <- boxplot.stats(data_num$hsrank)$out
+out_hsperc <- boxplot.stats(data_num$hsperc)$out
+out_hsizesq <- boxplot.stats(data_num$hsizesq)$out
+
+total_outliers <- c(length(out_sat), length(out_tothrs), 
+                    length(out_colgpa), length(out_verbmath), 
+                    length(out_hsize), length(out_hsrank), 
+                    length(out_hsperc), length(out_hsizesq))
+
+# Se crea dataframe con la suma total de valores atípicos
+names_rows <- data.frame(names(data_num))
+total_outliers <- data.frame(rows.names=names(data_num), total_outliers)
+total_outliers[order(total_outliers$total_outliers, decreasing=TRUE), ]
+```
+
+**Observaciones**
+
+Con en esta información, a continuación se exponen los criterios para conservar o eliminar los valores extremos.
+
+En primer lugar, las observaciones de la variable **hsizesq**, presentan un elevado número de valores extremos, esto se debe a que dicha variable es el valor cuadrado de la variable **hsize**, y por tanto los valores se hacen mas grandes y la distribución se sesga hacia la derecha. Dado que esta transformación no mejora las propiedades estadísticas de **hsize**, no se toma ninguna acción respecto a los valores extremos y se prescindirá de ella, en la sección de resolución de problemas y el análisis de modelos predictivos.
+
+Respecto a la variable **hsrank** un 6.4% de los datos son valores extremos, para la variable **hsize** un 4.1% y para la variable **hsperc** 3.2%.
+Aunque la proporción es considerable y hace que las distribuciones tengan un elevado sesgo a la derecha, no se tiene información adicional del proceso de muestreo del experimento realizado. Por tal razón, no se tiene evidencia para descartar los valores y se decide no tomar ninguna acción correctiva.
+
+Con el propósito de abordar el problema del sesgo en las distribuciones, en la [sección 5](#Seccion5) del presente documento, se procederá a aplicar la transformación mas adecuada, de modo que las variables tiendan a una distribución normal.
+
+Respecto a la variable **verbmath**, los valores se obtienen de la división entre el examen de competencia verbal SAT, cuyo rango es de 200-800 y el examen de competencia matemática SAT, cuyo rango es de 200-800, tal como se reporta en:
+
+<https://www.theclassroom.com/verbal-sat-scores-8525646.html>
+
+<https://blog.prepscholar.com/sat-score-range>
+
+Dicho lo anterior, y de acuerdo a la gráfica, su distribución estaría centrada alrededor de 1, además presenta un comportamiento normal y por tal razón, se consideran datos válidos y no se toma ninguna acción correctiva.
+
+Respecto a las variables **colgpa** y **sat**, en primer lugar se corrobora que los rangos sean coherentes en relación a los estándares definidos para estas variables. En este sentido los valores de **colgpa** están en el rango de 0-4 y para **sat** de 400-1600, tal como se reporta en:
+
+<https://satsuite.collegeboard.org/media/pdf/understanding-sat-scores.pdf>
+
+<https://blog.prepscholar.com/sat-gpa-conversion-table>
+
+<https://www.prepscholar.com/sat/s/colleges/Coe-College-SAT-scores-GPA>
+
+Con base en esto y de acuerdo a los gráficos anteriores, los valores extremos están en los rangos estándar y la presencia minoritaria de valores extremos, se debe a estudiantes con buen desempeño académico. En tal sentido, se consideran datos válidos y no se tomará ninguna acción correctiva.
+
+Respecto a la variable **tothrs** no realiza ninguna acción ya que no presenta valores extremos
+
+# **Análisis de los datos**
+
+En esta sección se realiza el análisis de los datos, el cual se dividirá en dos apartados. En el primero se desarrolla el análisis de las variables numéricas y en el segundo el análisis de las variables categóricas.
+
+## **Análisis variables numéricas**
+
+En primer lugar se realiza un análisis descriptivo de las variables numéricas, donde se presentan medidas de tendencia central.
+
+### **Análisis Descriptivo**
+
+```{r}
+# Se hace un resumen de las variables numéricas y categóricas
+summary(data_num)
+```
+
+Para complementar el análisis, se aplican otros estadísticos denominados robustos, ya que no se ven influenciados por valores extremos.
+
+```{r}
+mean_num <- sapply(data_num, mean, na.rm=TRUE)
+median_num <- sapply(data_num, median, na.rm=TRUE)
+var_num <- sapply(data_num, var, na.rm=TRUE)
+sd_num <- sapply(data_num, sd, na.rm=TRUE)
+skewness_num <- sapply(data_num, skewness, na.rm=TRUE)
+kurtosis_num <- sapply(data_num, kurtosis, na.rm=TRUE)
+w_mean_num <- sapply(data_num, winsor.mean, na.rm=TRUE)
+kurtosis_num <- sapply(data_num, kurtosis, na.rm=TRUE)
+
+fmean_trim <- function(x, trim) mean(x, trim=trim)
+mean_trim <- sapply(data_num, fmean_trim, trim=0.05)
+
+fmean_win <- function(x, trim) winsor.mean(x, trim=trim)
+mean_win <- sapply(data_num, fmean_win, trim=0.05)
+
+IQR_num <- sapply(data_num, IQR, na.rm=TRUE)
+mad_num <- sapply(data_num, mad, na.rm=TRUE)
+
+stats <- rbind(mean_num, median_num, var_num, sd_num, 
+               skewness_num, kurtosis_num, mean_trim, 
+               mean_win, IQR_num, mad_num)
+
+stats <- data.frame(stats)
+
+stats
+```
+
+**Observaciones**
+
+Para las variables **sat**, **colgpa** y **verbmath**, los valores de la media normal y la media winsorizada y media trim, son similares, lo cual es coherente dado que dichas variables tienen una distribución normal.
+
+Por otro lado, las variables **hsizesq**, **hsize**, **hsrank**, **hsperc** tienen diferencias considerables entre la media normal y media trim y winsorizada En el caso de la media normal, su cálculo es sensible a valores extremos. Por el contrario los valores de la media trim y winsorizada, son muy similares, ya que sus implementación es robusta y puede procesar los valores extremos.
+
+Respecto a la variable **tothrs** los valores de la media normal y la media winsorizada y media trim son similares, lo cual tiene sentido, dado que sus valores tienden ha una distribución uniforme.
+
+Para complementar el análisis anterior, a continuación se grafica los histograma de las 8 variables numéricas.
+
+Se observa un aspecto interesante en la variable **tothrs**, su distribución no es precisamente una distribución uniforme sino una distribución multimodal.
+
+```{r}
+ggplot(gather(data_num, cols, value), aes(x = value)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.5, 
+                 colour = "black", 
+                 fill = "white") +
+  facet_wrap(.~cols, ncol = 2, scales = 'free')  
+```
+
+Continuando con el análisis en este sección se plantea un análisis multivariable, para ello se realiza un gráfico de dispersión.
+
+```{r}
+pairs(data_num, upper.panel=NULL)
+```
+
+**Observaciones**
+
+En la figura se observa que las variables **hsize** y **hsizesq**, presentan un comportamiento exponencial. Esto sucede porque **hsizesq** es el valor cuadrado de **hsize**. En menor medida se observa un comportamiento lineal entre las variables **hsrank** y **hsperc** con **hsize**. Para las demás variables, no se aprecia un comportamiento definido.
+
+### **Test de normalidad**
+
+A continuación se realizan test de normalidad, basados en el análisis de histogramas y gráficos Q-Q
+
+```{r}
+graph_norm <- function(data1, data2, data3, data4, name1, name2, name3, name4){
+
+  nf = layout(
+    rbind(
+      c(1, 2),
+      c(3, 4)
+    )
+  )
+qqnorm(data1, main=paste("Q-Q", name1)); qqline(data1)
+qqnorm(data2, main=paste("Q-Q", name2)); qqline(data2)
+qqnorm(data3, main=paste("Q-Q", name3)); qqline(data3)
+qqnorm(data4, main=paste("Q-Q", name4)); qqline(data4)
+
+}
+```
+
+```{r}
+graph_norm(data_num$sat, 
+           data_num$tothrs, 
+           data_num$colgpa, 
+           data_num$verbmath, 
+           "sat", 
+           "tothrs",
+           "colgpa", 
+           "verbmath")
+
+graph_norm(data_num$hsize, 
+           data_num$hsrank, 
+           data_num$hsperc, 
+           data_num$hsizesq,
+           "hsize", 
+           "hsrank",
+           "hsperc", 
+           "hsizesq")
+```
+
+**Observaciones**
+
+Del análisis del histograma y gráfico Q-Q se concluye lo siguiente:
+
+- **sat**: sigue una distribución normal. 
+
+- **tothrs**: no sigue una distribución normal. Presenta múltiple modas. 
+
+- **colgpa**: sigue una distribución normal. 
+
+- **verbmath** sigue una distribución normal. 
+
+- **hize**: no normal, tiene sesgo a la derecha. 
+
+- **hsrank**: no normal, tiene sesgo a la derecha. 
+
+- **hsperc**: no normal, tiene sesgo a la derecha. 
+
+- **hisisq**: no normal, tiene  sesgo a la derecha.
+
+
+A continuación se aplican los test de Kolmogorov-Smirnov y Shapiro-Wilk, para evaluar la normalidad de las variables, desde un enfoque cuantitativo.
+
+```{r warning=FALSE}
+
+ks_test <- function(x) ks.test(x, pnorm, mean(x), sd(x))$p.value
+norm_test <- sapply(data_num, ks_test)
+norm_test
+```
+
+```{r}
+sp_test <- function(x) shapiro.test(x)$p.value
+norm_test <- sapply(data_num, sp_test)
+norm_test
+```
+
+
+**Observaciones**
+
+
+Luego de aplicar los dos test se aprecia que todos los p-value son menores que el nivel de significancia (0.05) y por ende se concluye que ninguna de las variables tiene una distribución normal.
+
+No obstante, y tras considerar el análisis gráfico y considerando el teorema de límite central (el tamaño de la muestra para cada variables es de 4137 observaciones), se puede afirmar que al menos las variables **sat**, **verbmath** y **colgpa**, tienen una distribución normal.
+
+### **Análisis de correlación**
+
+Dado que la mayoría de las variables no siguen una distribución normal, se aplicará la técnica de correlación de spearman, en la cual no asume ninguna suposición sobre la distribución de los datos.
+
+
+```{r message=TRUE, paged.print=TRUE}
+tab_corr(
+  data_num,
+  na.deletion = "pairwise",
+  corr.method = "spearman",
+  p.numeric = FALSE,
+  show.p = TRUE,
+  use.viewer = FALSE,
+  triangle = 'lower')
+```
+
+
+**Observaciones**
+
+Los valores en negrita sugieren que el p-value es significativo y en caso contrario que no es significativo. De acuerdo a lo anterior, se puede afirmar por ejemplo que la correlación usando el método de spearman para las variables **colgpa** y **sat** es de 0.395 con un nivel de confianza del 95%. Por el contrario, no se puede concluir que exista correlación entre **verbmath** y **colgpa**, dado que el p-value es mayor que 0.05. 
+
+A continuación, se crea gráfico de correlación, para visualizar de forma mas clara los resultados obtenidos. 
+
+
+```{r}
+corr <- round(cor( data_num, method = 'spearman' ), 1)
+
+corrplot(cor = corr, 
+         method = "circle", 
+         type = "lower", 
+         order = "FPC",
+         addCoef.col = "black", 
+         diag = FALSE,
+         number.cex=1.2,
+         tl.cex = 1.0)
+```
+
+Del gráfico y de los resultados de la sección anterior, se concluye que hay correlación positiva entre **hsrank** y **hsperc**, **hsize**. y negativa entre **hsrank**, **hsperc** y **colgpa** y **sat**, con un nivel de confianza del 95%. 
+
+
+### **Análisis de linealidad entre variables colgpa y sat en función de las variables continuas**
+
+
+Dado que el interés es buscar relaciones que expliquen los valores obtenidos para colgpa y sat, a continuación se hace un análisis de dichas variables, en función de las variables continuas restantes. 
+
+
+```{r message=FALSE, warning=FALSE}
+data_colgpa_melt <- melt(data_num, id.vars="colgpa")
+
+ggplot(data_colgpa_melt, aes(colgpa, log(value))) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  facet_wrap(~variable, scales = "free", ncol = 3)
+```
+
+
+### **Análisis de linealidad entre variables continuas y sat**
+
+Al igual que la sección anterior se hace un análisis de linealidad entre la variable **sat** y el resto de variables continuas.
+
+```{r message=FALSE, warning=FALSE}
+data_sat_melt <- melt(data_num, id.vars="sat")
+
+ggplot(data_sat_melt, aes(sat,log(value))) + 
+  geom_point() + 
+  geom_smooth(method = "lm") +
+  facet_wrap(~variable, scales = "free", ncol = 4)
+```
+
+
+**Observaciones**
+
+De los gráficos anteriores, se aprecia una relación lineal con pendiente positiva entre **sat** y **colgpa**, también una relación lineal con pendiente negativa entre **hsperc**, **hsrank**, respecto a **sat** y **colgpa**. En las variables **tothrs**, **verbmath** y **hsize**, se observa una relación lineal positiva mínima respecto **sat** y **colgpa**
+
+
+## **Análisis variables Categóricas**
+
+En esta sección se realiza el análisis de las variables categóricas.
+
+### **Análisis Descriptivo**
+
+
+```{r}
+summary(data_cat)
+```
+
+
+```{r}
+info_cat <- data_cat %>% 
+  inspect_cat()
+info_cat
+```
+
+```{r}
+info_cat %>%
+  show_plot()
+```
+
+
+```{r}
+inspect_imb(data_cat) %>% 
+  show_plot()
+```
+
+**Observaciones**
+
+En la variable **athlete** se observa que el 95% de los datos están categorizados como falso, lo que indica un porcentaje alto de estudiantes que no son atletas.
+Respecto a la variable **black** se observa que un 94% de los datos están categorizados como falso, lo que indica que hay alto porcentaje de estudiantes de raza blanca.
+Respecto a la variable **White**, se observa que un 93% de los datos están cateogorizados como verdadero, lo que indica que hay un bajo porcentaje de estudiantes de raza negra. 
+Finalmente para la variables **female**, se aprecia un 55% de los datos están categorizados como falso, lo que indica que el 55% de los estudiantes son hombres.
+
+
+# **Resolución del problema** 
+
+En este apartado se proponen dos problemas que se estudiarán desde dos enfoques, el primero desde la inferencia estadística y el segundo desde la perspectivas de modelos predictivos supervisados.
+
+## **Ser atleta influye en el promedio de la nota final (colgpa)**
+
+En primera instancia se plantea el problema de determinar si el hecho de que un estudiante sea atleta influye en el promedio de la nota final. 
+
+El primer paso es seleccionar las variables de interés, para ello se selecciona la variable **colgpa** y se selecciona si el estudiante es o no atleta
+
+```{r}
+colgpa_athlete <- data$colgpa[data$athlete == TRUE]
+colgpa_no_athlete <- data$colgpa[data$athlete == FALSE]
+```
+
+
+Se grafica el histograma sobre el que se superpone el valor medio y también un gráfico Q-Q para evaluar visualmente si las muestras de las dos variables de interés siguen una distribución normal.
+
+
+```{r}
+
+nf = layout(
+  rbind(
+    c(1, 2),
+    c(3, 4)
+  )
+)
+
+
+hist(colgpa_athlete, breaks=100, main="colgpa athlete", xlab="", col="blue")
+abline(v=mean(colgpa_athlete),                       
+       col="red",
+       lwd=3)
+text(x=mean(colgpa_athlete)*1.3,                   
+     y=mean(colgpa_athlete)*4.5,
+     paste("Mean =", round(mean(colgpa_athlete),2)),
+     col="red",
+     cex=1)
+
+qqnorm(colgpa_athlete, main="Q-Q athlete"); qqline(colgpa_athlete)
+
+hist(colgpa_no_athlete, breaks=100, main="colgpa no athlete", xlab="", col="red")
+abline(v=mean(colgpa_no_athlete),                       
+       col="blue",
+       lwd=3)
+text(x=mean(colgpa_no_athlete)*1.3,                   
+     y=mean(colgpa_no_athlete)*48,
+     paste("Mean =", round(mean(colgpa_no_athlete),2)),
+     col="blue",
+     cex=1)
+
+qqnorm(colgpa_no_athlete, main="Q-Q no athlete"); qqline(colgpa_no_athlete)
+```
+
+
+**Observaciones**
+
+A partir de los gráficos Q-Q se aprecia que las dos muestras siguen una distribución normal, también se aprecia que el histograma tiene la forma de una distribución normal. Otro aspecto interesante es que el valor promedio para la muestra **colgpa no athlete**,  es mayor respecto a **colgpa no athlete**. Preliminarmente a partir de este análisis descriptivo se puede inferir que el valor promedio de la nota en los estudiantes es diferente si este es o no atleta.
+
+### **Análisis de normalidad de las muestras**
+
+Se realizan dos test estadísticos para evaluar la normalidad en las muestras.
+
+```{r warning=FALSE}
+shapiro.test(colgpa_athlete)$p.value
+
+ks.test(colgpa_athlete, pnorm, mean(colgpa_athlete), sd(colgpa_athlete))$p.value
+```
+
+```{r warning=FALSE}
+shapiro.test(colgpa_no_athlete)$p.value
+
+ks.test(colgpa_no_athlete, pnorm, mean(colgpa_no_athlete), sd(colgpa_no_athlete))$p.value
+```
+
+
+**Observaciones**
+
+Para la muestra **colgpa athlete** se aprecia que los dos test son contradictorios. Por un lado con el test shapiro-Wilk se concluye que la muestra no sigue una distribución normal y por otro lado, con el test de kolmogorov-Smirnov se concluye que si, lo mismo ocurre con la muestra **colgpa no athlete**
+
+No obstante, teniendo en cuenta el análisis gráfico y considerando el teorema de límite central, se puede considerar que las dos muestras siguen una distribución normal.
+
+### **Análisis de la varianza entre las muestras**
+
+Tras realizar el test de varianza se aprecia que el p-value es mayor que 0.05, con lo cual se infiere que las dos muestras tiene varianzas iguales. 
+
+```{r}
+var_test <- var.test(colgpa_athlete, colgpa_no_athlete)
+var_test$p.value
+```
+
+### **Pregunta de Investigación**
+
+Para abordar el problema de forma específica, se plantea la siguiente pregunta:
+
+¿Hay diferencias en el promedio de nota final de los estudiantes si son o no atletas?
+
+### **Hipótesis nula y alternativa**
+
+Dado que es un problema de inferencia estadística, se deben plantear la hipótesis nula y alternativa.
+La hipótesis nula plantea que no hay diferencia en el promedio de nota final por el hecho que un estudiante sea atleta y la hipótesis alternativa plantea que si hay diferencia en el promedio de nota final.
+
+$$ H_{0}: u_{1} = u_{2} \\
+H_{1}: u_{1} \neq u_{2} $$
+
+### **Justificación del test a aplicar**
+
+El test a aplicar es el **contraste de dos muestras independientes sobre la media con varianzas desconocidas pero iguales**. A continuación se plantean la justificación de porque se considera adecuado dicho test para resolver el problema.
+
+-   El tamaño de las muestras es diferente y no tienen datos faltantes/nulos, por ende se considera que las dos muestras son independientes.
+
+```{r}
+length(colgpa_athlete)
+length(colgpa_no_athlete)
+```
+
+-   Se asume que las dos muestras siguen una distribución normal, de acuerdo al análisis gráfico y de acuerdo al teorema de limite central (tamaño de cada muestra mayor a 30).
+
+-   Las varianzas son iguales, lo cual se comprobó con el test de varianza
+
+-   Se desconoce la varianza poblacional.
+
+### **Cálculo**
+
+```{r}
+t.test(colgpa_athlete, colgpa_no_athlete, var.equal=TRUE)
+```
+
+### **Interpretación**
+
+De acuerdo al test anterior, se concluye que si hay diferencias en las notas de los estudiantes si estos son o no atletas, con un nivel de confianza del 95%. Lo anterior se infiere a partir del p-value, cuyo valor es menor que 0.05. De igual manera, el tobs esta fuera de la región de aceptación, con lo cual se rechaza la hipótesis nula.
+
+
+## **¿Se puede predecir la nota promedio final de los estudiantes?** {#Seccion5}
+
+El problema de este apartado se abordará desde la perspectiva de modelos  supervisados, en particular
+regresión lineal y árboles de decisión con técnica de ensamble.
+
+### **Modelo de regresión lineal**
+
+En este apartado se seleccionan las variables de interés y se aplican transformaciones para mejorar
+algunas propiedades estadísticas, lo cual permita brindar mayor información y capacidad predictiva/generalización al modelo.
+
+En primer lugar se prescindirá de la variable **hisizesq**, por su alta correlación con la variable **hisize**, de este modo se evita información redundante y multicolinealidad.
+
+
+```{r}
+data <- data[, !names(data) %in% c("hsizesq")]
+```
+
+
+En función del análisis de los apartados anteriores, las variables que se deben transformar son **hsperc**, **hsrank**, **hsizesq** y **tothrs**, para ello se aplicará el test BoxCox.
+
+
+```{r message=FALSE, warning=FALSE}
+lambda_hsperc  = BoxCox.lambda(data$hsperc)
+data$hsperc = BoxCox(data$hsperc, lambda_hsperc)
+
+lambda_hsrank  = BoxCox.lambda(data$hsrank)
+data$hsrank <- BoxCox(data$hsrank, lambda_hsrank)
+
+lambda_hsize  = BoxCox.lambda(data$hsize)
+data$hsize <- BoxCox(data$hsize, lambda_hsize)
+
+lambda_tothrs  = BoxCox.lambda(data$tothrs)
+data$tothrs <- BoxCox(data$tothrs, lambda_tothrs)
+```
+
+
+En el siguiente gráfico se corrobora que la distribución de las transformaciones, tuvo un cambio significativo, las distribuciones tienden a un comportamiento normal.
+
+```{r message=FALSE, warning=FALSE}
+
+data_transf = data[, (colnames(data) %in% c("hsperc", "hsrank", "hsize", "tothrs"))]
+
+ggplot(gather(data_transf, cols, value), aes(x = value)) + 
+  geom_histogram(aes(y = after_stat(density)), 
+                 binwidth = 0.5, 
+                 colour = "black", 
+                 fill = "white") +
+  facet_wrap(.~cols, ncol = 2, scales = 'free') 
+```
+
+El siguiente paso es dividir el conjunto de datos en entrenamiento y test, para para entrenar y evaluar el modelo, en este caso se asigna un 70% para entrenamiento y 30% pata test.
+
+```{r}
+set.seed(123)
+split <- createDataPartition(data$colgpa, p= .7, list = FALSE, times = 1)
+train <- data[split,]
+test <- data[-split,]
+```
+
+
+Con la función lm se crea modelo de regresión lineal multivariado.
+
+```{r}
+Model1 <- lm(colgpa ~., data=train)
+summary(Model1)
+```
+
+**Observaciones**
+
+Los resultados muestran que el modelo tiene una baja capacidad predictiva, dado que el valor de Multiple R-squared (R2) es de 0.335. También se aprecia que las variables **verbmath**, **hsize**, **hsrank** y  **white**,  no aportan información relevante al modelo, ya que los valores del p-value son mayores que 0.05. En contraste, variables con **sat**, **tothrs**, **athlete**, **hsperc** y **female**,  aportan información relevante, dado que los p-value son menores que 0.05.
+
+
+A continuación, se evalúa el desempeño del modelo en el conjunto de test.
+
+```{r}
+colgpa_pred1 <- predict(Model1, newdata=test, type='response')
+
+RMSE(colgpa_pred1, test$colgpa)
+R2(colgpa_pred1, test$colgpa, form = "traditional")
+MAE(colgpa_pred1, test$colgpa)
+```
+
+Como se aprecia el valor de R2 mejora levemente, sin embargo sigue teniendo una baja capacidad  predictiva.
+
+A continuación, se eliminan las variables que menos aportaron información, y se precede a realizar el entrenamiento y test del modelo.
+
+```{r}
+train <- train[, !(colnames(train) %in% c("verbmath", "hsrank", "hsize", "white"))]
+test <- test[, !(colnames(test) %in% c("verbmath", "hsrank", "hsizesq", "white"))]
+```
+
+```{r}
+Model2 <- lm(colgpa ~., data=train)
+summary(Model2)
+```
+
+**Observaciones**
+
+Se aprecia una leve mejora en el valor de Multiple R-squared (R2), sin embargo, el modelo tiene una capacidad predictiva muy baja.
+
+A continuación se realiza validación del modelo en el conjunto de entrenamiento, donde se observa una leve mejora en el valor de R2. Tal como  en el caso anterior, el modelo no tiene una baja capacidad predictiva.
+
+```{r}
+colgpa_pred2 <- predict(Model2, newdata=test, type='response')
+
+RMSE(colgpa_pred2, test$colgpa)
+R2(colgpa_pred2, test$colgpa, form = "traditional")
+MAE(colgpa_pred2, test$colgpa)
+```
+
+
+### **Modelo arboles de decisión y ensamble**
+
+En este apartado se aborda un enfoque mas robusto para intentar dar respuesta a la pregunta. Para ello se usará como modelo base arboles de decisión y se usará una técnica de ensamble denominada baggging. En dicha técnica se generan múltiples modelos de árboles de decisión, a partir de la selección aleatoria con reemplazó de las features o variables independientes. Posteriormente se realiza un proceso de votación asignando el mismo peso a cada modelo generado y finalmente se toma el valor promedio de todos los modelos generados. 
+
+En primer lugar, se divide el conjunto de datos en entrenamiento y test, para evaluar la capacidad predictiva/generalización del modelo. 
+
+```{r}
+set.seed(123)
+split <- createDataPartition(data$colgpa, p= .7, list = FALSE, times = 1)
+train <- data[split,]
+test <- data[-split,]
+```
+
+Con el propósito de entrenar el modelo de forma robusta y disminuir la sobreoptimizacíon, se usa la técnica de validación cruzada; para este caso se selecciona el método k-fold, con una partición del conjunto de entrenamiento en 10 folds. 
+
+Para aplicar la técnica de bagging con arboles de decisión se usa la opción treebag. 
+
+```{r}
+set.seed(123)
+
+ctrl <- trainControl(method = "cv",  number = 10) 
+
+Model3 <- train(
+  colgpa ~ .,
+  data = train,
+  method = "treebag",
+  trControl = ctrl,
+  importance = TRUE
+  )
+
+Model3
+```
+
+**Observaciones**
+
+Los resultados muestran que el valor de R2 es de 0.304804, que es muy bajo y por ende se concluye que el modelo tiene baja capacidad predictiva.   
+
+Otro característica interesante que identificar las variables que aportan mayor información al modelo. 
+Tal como se aprecia, la tres variables que aporta mayor información son **sat**, **hsperc** y **hsrank**, que es coherente con los valores obtenidos con el modelo de regresión lineal.
+
+
+```{r}
+plot(varImp(Model3), 10)
+```
+
+
+Finalmente se evalúa la capacidad predictiva/generalización del modelo en el conjunto de test.
+Tal como aprecia hay un leve mejora en el valor de R2, sin embargo el modelo tiene una capacidad predictiva baja.
+
+```{r}
+colgpa_pred3 <- predict(Model3, test)
+postResample(colgpa_pred3, test$colgpa)
+```
+
+
+# **Exportar conjunto de datos final**
+
+```{r}
+write.csv(data, "data\\gpa_final.csv")
+```
+
